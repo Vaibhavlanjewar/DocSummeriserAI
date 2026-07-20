@@ -1,0 +1,19 @@
+# Environment & Secret Keys
+.env
+*.env
+firebase.json
+firebase-credentials.json
+
+# Dependencies
+node_modules/
+.venv/
+venv/
+__pycache__/
+*.pyc
+
+# IDE & System Files
+.vscode/
+.idea/
+.DS_Store
+dist/
+build/
