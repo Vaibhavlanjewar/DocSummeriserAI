@@ -1,6 +1,7 @@
 import io
 import os
 import math
+import json
 from datetime import datetime, timezone
 
 from dotenv import load_dotenv
@@ -10,7 +11,7 @@ from pydantic import BaseModel
 from pypdf import PdfReader
 
 # LLM & Embeddings SDKs
-from groq import Groq
+from groq import Groq  # type: ignore
 from google import genai
 
 # Firebase SDK
@@ -27,23 +28,33 @@ GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 
 if not GEMINI_API_KEY or not GROQ_API_KEY:
-    raise RuntimeError("Missing GEMINI_API_KEY or GROQ_API_KEY in .env")
-
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-FIREBASE_PATH = os.path.join(BASE_DIR, "firebase.json")
-
-if not os.path.exists(FIREBASE_PATH):
-    raise RuntimeError(f"firebase.json not found at:\n{FIREBASE_PATH}")
+    raise RuntimeError("Missing GEMINI_API_KEY or GROQ_API_KEY in environment variables.")
 
 # ----------------------------------------------------
-# Clients Initialization
+# Clients Initialization & Firebase (Vercel Env OR Local File)
 # ----------------------------------------------------
 
 groq_client = Groq(api_key=GROQ_API_KEY)
 gemini_client = genai.Client(api_key=GEMINI_API_KEY)
 
+firebase_env = os.getenv("FIREBASE_CREDENTIALS")
+
 if not firebase_admin._apps:
-    cred = credentials.Certificate(FIREBASE_PATH)
+    if firebase_env:
+        # Vercel Production: Load from JSON string in environment variable
+        try:
+            cred_dict = json.loads(firebase_env)
+            cred = credentials.Certificate(cred_dict)
+        except Exception as e:
+            raise RuntimeError(f"Failed to parse FIREBASE_CREDENTIALS env variable: {e}")
+    else:
+        # Local Development: Fallback to local firebase.json file
+        BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+        FIREBASE_PATH = os.path.join(BASE_DIR, "firebase.json")
+        if not os.path.exists(FIREBASE_PATH):
+            raise RuntimeError(f"firebase.json not found locally at:\n{FIREBASE_PATH}")
+        cred = credentials.Certificate(FIREBASE_PATH)
+
     firebase_admin.initialize_app(cred)
 
 db = firestore.client()
@@ -58,9 +69,25 @@ class ChatRequest(BaseModel):
 
 app = FastAPI(title="AI Document RAG Engine", version="4.0")
 
+# ----------------------------------------------------
+# CORS Middleware (Localhost + Production + Vercel Previews)
+# ----------------------------------------------------
+
+origins = [
+    "https://doc-summeriser-ai-4fi5.vercel.app",  # Production Vercel Frontend
+    "http://localhost:5173",                       # Vite Local Dev
+    "http://127.0.0.1:5173",
+    "http://localhost:3000",
+]
+
+frontend_env = os.getenv("FRONTEND_URL")
+if frontend_env:
+    origins.append(frontend_env)
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
+    allow_origins=origins,
+    allow_origin_regex=r"https://.*\.vercel\.app",  # Dynamically allows any Vercel preview domain
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -274,7 +301,8 @@ def documents():
         return result
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-    
+
+
 @app.delete("/documents/{doc_id}")
 def delete_document(doc_id: str):
     """Deletes a document and its vector embeddings from Firestore."""
@@ -282,8 +310,8 @@ def delete_document(doc_id: str):
         doc_ref = db.collection("documents").document(doc_id)
         if not doc_ref.get().exists:
             raise HTTPException(status_code=404, detail="Document not found.")
-        
+
         doc_ref.delete()
         return {"status": "success", "message": f"Document {doc_id} deleted successfully."}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))    
+        raise HTTPException(status_code=500, detail=str(e))
