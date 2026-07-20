@@ -15,7 +15,7 @@
   ],
   "routes": [
     {
-      "src": "/(summarize|chat|documents.*)",
+      "src": "/$|/(summarize|chat|documents.*)",
       "dest": "backend/main.py"
     },
     {
