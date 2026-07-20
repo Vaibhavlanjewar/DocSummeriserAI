@@ -15,24 +15,15 @@
   ],
   "routes": [
     {
-      "src": "/summarize",
+      "src": "/(summarize|chat|documents.*)",
       "dest": "backend/main.py"
     },
     {
-      "src": "/chat",
-      "dest": "backend/main.py"
-    },
-    {
-      "src": "/documents/(.*)",
-      "dest": "backend/main.py"
-    },
-    {
-      "src": "/documents",
-      "dest": "backend/main.py"
+      "handle": "filesystem"
     },
     {
       "src": "/(.*)",
-      "dest": "frontend/$1"
+      "dest": "/index.html"
     }
   ]
 }
