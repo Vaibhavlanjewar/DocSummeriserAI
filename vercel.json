@@ -1,0 +1,38 @@
+{
+  "version": 2,
+  "builds": [
+    {
+      "src": "frontend/package.json",
+      "use": "@vercel/static-build",
+      "config": {
+        "distDir": "dist"
+      }
+    },
+    {
+      "src": "backend/main.py",
+      "use": "@vercel/python"
+    }
+  ],
+  "routes": [
+    {
+      "src": "/summarize",
+      "dest": "backend/main.py"
+    },
+    {
+      "src": "/chat",
+      "dest": "backend/main.py"
+    },
+    {
+      "src": "/documents/(.*)",
+      "dest": "backend/main.py"
+    },
+    {
+      "src": "/documents",
+      "dest": "backend/main.py"
+    },
+    {
+      "src": "/(.*)",
+      "dest": "frontend/$1"
+    }
+  ]
+}
