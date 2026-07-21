@@ -32,28 +32,36 @@ if not GEMINI_API_KEY or not GROQ_API_KEY:
     raise RuntimeError("Missing GEMINI_API_KEY or GROQ_API_KEY in environment variables.")
 
 # ----------------------------------------------------
-# Clients & Firebase Setup (Vercel Env OR Local File)
+# Clients & Firebase Setup (Supports Raw JSON, File Paths & Local Fallback)
 # ----------------------------------------------------
 
 groq_client = Groq(api_key=GROQ_API_KEY)
 gemini_client = genai.Client(api_key=GEMINI_API_KEY)
 
-firebase_env = os.getenv("FIREBASE_CREDENTIALS")
+# Check both common variable names
+firebase_env = os.getenv("FIREBASE_CREDENTIALS") or os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
 
 if not firebase_admin._apps:
     if firebase_env:
-        # Vercel Production: Load from single-line JSON string in env variable
+        env_str = firebase_env.strip()
         try:
-            cred_dict = json.loads(firebase_env)
-            cred = credentials.Certificate(cred_dict)
+            if env_str.startswith("{"):
+                # Case 1: Raw JSON string passed in environment variable
+                cred_dict = json.loads(env_str)
+                cred = credentials.Certificate(cred_dict)
+            else:
+                # Case 2: File path passed in environment variable (e.g. ./firebase.json)
+                cred = credentials.Certificate(env_str)
         except Exception as e:
-            raise RuntimeError(f"Failed to parse FIREBASE_CREDENTIALS env variable: {e}")
+            raise RuntimeError(f"Failed to parse Firebase credentials from environment variable: {e}")
     else:
-        # Local Development: Fallback to local firebase.json file
+        # Case 3: Local Development Fallback to local firebase.json file
         BASE_DIR = os.path.dirname(os.path.abspath(__file__))
         FIREBASE_PATH = os.path.join(BASE_DIR, "firebase.json")
         if not os.path.exists(FIREBASE_PATH):
-            raise RuntimeError(f"firebase.json not found locally at:\n{FIREBASE_PATH}")
+            raise RuntimeError(
+                f"Firebase credentials not found in env (FIREBASE_CREDENTIALS) or local file at:\n{FIREBASE_PATH}"
+            )
         cred = credentials.Certificate(FIREBASE_PATH)
 
     firebase_admin.initialize_app(cred)
@@ -93,7 +101,7 @@ async def catch_exceptions_middleware(request: Request, call_next):
         )
 
 # ----------------------------------------------------
-# CORS Middleware (Strictly No Trailing Slashes)
+# CORS Middleware
 # ----------------------------------------------------
 
 origins = [
@@ -105,13 +113,12 @@ origins = [
 
 frontend_env = os.getenv("FRONTEND_URL")
 if frontend_env:
-    # Ensure any custom env URL also strips trailing slash
     origins.append(frontend_env.rstrip("/"))
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=origins,
-    allow_origin_regex=r"https://.*\.vercel\.app",  # Dynamically allows any Vercel preview URL
+    allow_origin_regex=r"https://.*\.vercel\.app",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -219,7 +226,7 @@ async def summarize_document(file: UploadFile = File(...)):
         # 1. Executive Summary via Groq Llama 3.3
         summary_res = summarize_with_groq(text)
 
-        # 2. Chunk text & generate Gemini Embeddings (max 10 chunks to avoid Vercel serverless timeouts)
+        # 2. Chunk text & generate Gemini Embeddings
         raw_chunks = chunk_text(text)
         embedded_chunks = []
         for i, chunk in enumerate(raw_chunks[:10]):
@@ -318,7 +325,7 @@ def documents():
             data = doc.to_dict()
             data["id"] = doc.id
             if "chunks" in data:
-                del data["chunks"]  # Exclude raw vector arrays from list response
+                del data["chunks"]
             if "created_at" in data and data["created_at"]:
                 data["created_at"] = str(data["created_at"])
             result.append(data)
