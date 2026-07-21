@@ -65,7 +65,7 @@ db = firestore.client()
 
 class ChatRequest(BaseModel):
     document_id: str
-    question: str
+    question: str 
 
 app = FastAPI(title="AI Document RAG Engine", version="4.0")
 
