@@ -1,40 +1,31 @@
-import { useEffect, useState } from "react";
 import { deleteDocument } from "../services/api";
 
-export default function History({ refreshKey }) {
-  const [docs, setDocs] = useState([]);
-
-  const fetchDocs = () => {
-    fetch("http://127.0.0.1:8000/documents")
-      .then((r) => r.json())
-      .then(setDocs)
-      .catch(console.error);
-  };
-
-  useEffect(() => {
-    fetchDocs();
-  }, [refreshKey]);
-
-  const handleDelete = async (docId, filename) => {
+export default function History({ history, onSelectDoc, onRefresh }) {
+  const handleDelete = async (e, docId, filename) => {
+    e.stopPropagation(); // Prevents triggering onSelectDoc when clicking delete
     if (!window.confirm(`Are you sure you want to delete "${filename}"?`)) return;
 
     try {
       await deleteDocument(docId);
-      // Remove deleted item directly from state
-      setDocs((prevDocs) => prevDocs.filter((d) => d.id !== docId));
+      if (onRefresh) onRefresh();
     } catch (err) {
       alert(`Failed to delete document: ${err.message}`);
     }
   };
 
-  if (docs.length === 0) return null;
+  if (!history || history.length === 0) return null;
 
   return (
     <div className="history">
       <h2>Recent Documents</h2>
       <div className="history-grid">
-        {docs.map((doc) => (
-          <div className="history-item" key={doc.id}>
+        {history.map((doc) => (
+          <div 
+            className="history-item" 
+            key={doc.id}
+            onClick={() => onSelectDoc(doc)}
+            style={{ cursor: "pointer" }}
+          >
             <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
               <span>📄</span>
               <h4>{doc.filename}</h4>
@@ -43,7 +34,7 @@ export default function History({ refreshKey }) {
             <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
               <small>{doc.char_count ? `${doc.char_count} chars` : "Processed"}</small>
               <button
-                onClick={() => handleDelete(doc.id, doc.filename)}
+                onClick={(e) => handleDelete(e, doc.id, doc.filename)}
                 title="Delete document"
                 style={{
                   background: "rgba(239, 68, 68, 0.15)",

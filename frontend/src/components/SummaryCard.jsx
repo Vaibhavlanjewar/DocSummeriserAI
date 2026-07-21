@@ -1,7 +1,7 @@
 import { useState } from "react";
 import ReactMarkdown from "react-markdown";
 
-export default function SummaryCard({ summary }) {
+export default function SummaryCard({ filename, summary }) {
   const [copied, setCopied] = useState(false);
 
   if (!summary) return null;
@@ -17,14 +17,14 @@ export default function SummaryCard({ summary }) {
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = "summary.md";
+    a.download = `${filename || "document"}_summary.md`;
     a.click();
   };
 
   return (
     <div className="summary-card">
       <div className="summary-header">
-        <h2>Document Summary</h2>
+        <h2>{filename ? `Summary: ${filename}` : "Document Summary"}</h2>
         <div className="action-btns">
           <button className="btn-secondary" onClick={copy}>
             {copied ? "✓ Copied!" : "Copy"}
