@@ -1,3 +1,6 @@
+
+>> actiavte env :  .\.venv\Scripts\Activate.ps1
+
 # 📄 AI Document Summarizer & RAG Engine
 
 A production-ready **AI Document Intelligence Platform** built using **FastAPI**, **React (Vite)**, **Google Gemini**, **Groq Llama 3.3**, and **Firebase Firestore**.

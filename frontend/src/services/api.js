@@ -1,7 +1,7 @@
 // frontend/src/services/api.js
 
 // Dynamic API URL: Environment Variable OR Live Production Vercel Backend
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "https://doc-summeriser-ai.vercel.app";
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://127.0.0.1:8000";
 
 // 1. Upload & Summarize Document
 export const summarizeDocument = async (file) => {

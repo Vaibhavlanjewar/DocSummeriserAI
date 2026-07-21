@@ -5,7 +5,8 @@ import json
 from datetime import datetime, timezone
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, UploadFile, File, HTTPException
+from fastapi import FastAPI, UploadFile, File, HTTPException, Request
+from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from pypdf import PdfReader
@@ -31,7 +32,7 @@ if not GEMINI_API_KEY or not GROQ_API_KEY:
     raise RuntimeError("Missing GEMINI_API_KEY or GROQ_API_KEY in environment variables.")
 
 # ----------------------------------------------------
-# Clients Initialization & Firebase (Vercel Env OR Local File)
+# Clients & Firebase Setup (Vercel Env OR Local File)
 # ----------------------------------------------------
 
 groq_client = Groq(api_key=GROQ_API_KEY)
@@ -41,7 +42,7 @@ firebase_env = os.getenv("FIREBASE_CREDENTIALS")
 
 if not firebase_admin._apps:
     if firebase_env:
-        # Vercel Production: Load from JSON string in environment variable
+        # Vercel Production: Load from single-line JSON string in env variable
         try:
             cred_dict = json.loads(firebase_env)
             cred = credentials.Certificate(cred_dict)
@@ -60,17 +61,39 @@ if not firebase_admin._apps:
 db = firestore.client()
 
 # ----------------------------------------------------
-# Models & Request Schemas
+# FastAPI App & Models
 # ----------------------------------------------------
 
 class ChatRequest(BaseModel):
     document_id: str
-    question: str 
+    question: str
 
 app = FastAPI(title="AI Document RAG Engine", version="4.0")
 
 # ----------------------------------------------------
-# CORS Middleware (Localhost + Production + Vercel Previews)
+# Global Exception Catch-All Middleware (Prevents CORS-masked 500s)
+# ----------------------------------------------------
+
+@app.middleware("http")
+async def catch_exceptions_middleware(request: Request, call_next):
+    try:
+        return await call_next(request)
+    except Exception as exc:
+        print(f"[Backend Error]: {exc}")
+        origin = request.headers.get("origin", "*")
+        return JSONResponse(
+            status_code=500,
+            content={"detail": f"Server Error: {str(exc)}"},
+            headers={
+                "Access-Control-Allow-Origin": origin if origin != "*" else "http://localhost:5173",
+                "Access-Control-Allow-Credentials": "true",
+                "Access-Control-Allow-Methods": "*",
+                "Access-Control-Allow-Headers": "*",
+            },
+        )
+
+# ----------------------------------------------------
+# CORS Middleware (Strictly No Trailing Slashes)
 # ----------------------------------------------------
 
 origins = [
@@ -82,12 +105,13 @@ origins = [
 
 frontend_env = os.getenv("FRONTEND_URL")
 if frontend_env:
-    origins.append(frontend_env)
+    # Ensure any custom env URL also strips trailing slash
+    origins.append(frontend_env.rstrip("/"))
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=origins,
-    allow_origin_regex=r"https://.*\.vercel\.app",  # Dynamically allows any Vercel preview domain
+    allow_origin_regex=r"https://.*\.vercel\.app",  # Dynamically allows any Vercel preview URL
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -173,7 +197,7 @@ Document:
         raise HTTPException(status_code=500, detail=f"Groq API Error: {str(e)}")
 
 # ----------------------------------------------------
-# API Routes
+# API Endpoints
 # ----------------------------------------------------
 
 @app.get("/")
@@ -186,16 +210,16 @@ async def summarize_document(file: UploadFile = File(...)):
     try:
         file_bytes = await file.read()
         if len(file_bytes) == 0:
-            raise HTTPException(status_code=400, detail="Empty file.")
+            raise HTTPException(status_code=400, detail="Empty file uploaded.")
 
         text = extract_text(file_bytes, file.filename)
         if not text.strip():
-            raise HTTPException(status_code=400, detail="No readable text found.")
+            raise HTTPException(status_code=400, detail="No readable text found in document.")
 
-        # 1. Summary via Groq
+        # 1. Executive Summary via Groq Llama 3.3
         summary_res = summarize_with_groq(text)
 
-        # 2. Chunk text & generate Gemini Embeddings per chunk (max 10 chunks)
+        # 2. Chunk text & generate Gemini Embeddings (max 10 chunks to avoid Vercel serverless timeouts)
         raw_chunks = chunk_text(text)
         embedded_chunks = []
         for i, chunk in enumerate(raw_chunks[:10]):
@@ -206,7 +230,7 @@ async def summarize_document(file: UploadFile = File(...)):
                 "embedding": vec
             })
 
-        # 3. Store record with chunks in Firestore
+        # 3. Store document record with chunk vectors in Firestore
         document = {
             "filename": file.filename,
             "summary": summary_res,
@@ -247,7 +271,7 @@ async def chat_with_document(req: ChatRequest):
         # 1. Generate query embedding via Gemini
         q_vector = embedding_with_gemini(req.question)
 
-        # 2. Vector search: find top-scoring chunks
+        # 2. Vector search: find top-3 scoring chunks using Cosine Similarity
         scored_chunks = []
         for c in chunks:
             score = cosine_similarity(q_vector, c.get("embedding", []))
@@ -256,7 +280,7 @@ async def chat_with_document(req: ChatRequest):
         scored_chunks.sort(key=lambda x: x[0], reverse=True)
         top_context = "\n---\n".join([item[1] for item in scored_chunks[:3]])
 
-        # 3. Pass context + question to Groq Llama 3.3
+        # 3. Generate answer using retrieved context + Groq Llama 3.3
         prompt = f"""
 You are an AI assistant answering questions about an uploaded document.
 Answer the user's question accurately using ONLY the context provided below.
@@ -294,7 +318,7 @@ def documents():
             data = doc.to_dict()
             data["id"] = doc.id
             if "chunks" in data:
-                del data["chunks"]  # Exclude raw vectors from list output
+                del data["chunks"]  # Exclude raw vector arrays from list response
             if "created_at" in data and data["created_at"]:
                 data["created_at"] = str(data["created_at"])
             result.append(data)
